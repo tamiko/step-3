@@ -20,6 +20,7 @@
 #include <deal.II/lac/generic_linear_algebra.h> // CHANGES
 namespace LA = dealii::LinearAlgebraPETSc;      // CHANGES
 #include <deal.II/lac/sparsity_tools.h>         // CHANGES
+#include <deal.II/lac/petsc_precondition.h>
 
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/grid/grid_generator.h>
@@ -217,21 +218,33 @@ void Step3::assemble_system()
 
 void Step3::solve()
 {
-//   SolverControl solver_control(1000, 1e-12);
-//   SolverCG<Vector<double>> solver(solver_control);
-//   solver.solve(system_matrix, solution, system_rhs, PreconditionIdentity());
+  SolverControl solver_control(1000, 1e-12);
+  LA::SolverCG solver(solver_control, MPI_COMM_WORLD);
+
+  PETScWrappers::PreconditionNone preconditioner(system_matrix);
+
+  solver.solve(system_matrix, solution, system_rhs, preconditioner);
+
+  constraints.distribute(solution);
 }
 
 
 
 void Step3::output_results() const
 {
+  LA::MPI::Vector locally_relevant_solution(
+      locally_owned_dofs, locally_relevant_dofs, MPI_COMM_WORLD);
+  locally_relevant_solution = solution;
+
   DataOut<2> data_out;
   data_out.attach_dof_handler(dof_handler);
-  data_out.add_data_vector(solution, "solution");
+  data_out.add_data_vector(locally_relevant_solution, "solution");
   data_out.build_patches();
 
-  std::ofstream output("solution.vtk");
+  const auto mpi_rank =
+      dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+
+  std::ofstream output("solution-" + std::to_string(mpi_rank) + ".vtk");
   data_out.write_vtk(output);
 }
 
@@ -242,8 +255,8 @@ void Step3::run()
   make_grid();
   setup_system();
   assemble_system();
-//   solve();
-//   output_results();
+  solve();
+  output_results();
 }
 
 
