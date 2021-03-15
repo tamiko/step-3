@@ -72,8 +72,8 @@ private:
 
   parallel::distributed::Triangulation<2> triangulation;
 
-  FE_Q<2>          fe;
-  DoFHandler<2>    dof_handler;
+  FE_Q<2>       fe;
+  DoFHandler<2> dof_handler;
 
   IndexSet locally_owned_dofs;
   IndexSet locally_relevant_dofs;
@@ -101,18 +101,17 @@ void Step3::make_grid()
 
   {
     const auto mpi_rank =
-        dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+      dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
     std::ofstream out("triangulation-" + std::to_string(mpi_rank) + ".inp");
     GridOut       grid_out;
     grid_out.write_ucd(triangulation, out);
   }
 
   const auto mpi_rank =
-      dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+    dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
   std::cout << "Rank " + std::to_string(mpi_rank) + "  #cells = "
             << triangulation.n_active_cells() << std::endl;
 }
-
 
 
 
@@ -123,7 +122,7 @@ void Step3::setup_system()
   dof_handler.distribute_dofs(fe);
 
   const auto mpi_rank =
-      dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+    dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
   std::cout << "Rank " + std::to_string(mpi_rank) + "  #dofs  = "
             << dof_handler.n_locally_owned_dofs() << std::endl;
 
@@ -153,10 +152,14 @@ void Step3::setup_system()
   DynamicSparsityPattern dsp(locally_relevant_dofs);
 
   DoFTools::make_sparsity_pattern(dof_handler, dsp);
-  SparsityTools::distribute_sparsity_pattern(
-      dsp, locally_owned_dofs, MPI_COMM_WORLD, locally_relevant_dofs);
+  SparsityTools::distribute_sparsity_pattern(dsp,
+                                             locally_owned_dofs,
+                                             MPI_COMM_WORLD,
+                                             locally_relevant_dofs);
 
-  system_matrix.reinit(locally_owned_dofs, locally_owned_dofs, dsp,
+  system_matrix.reinit(locally_owned_dofs,
+                       locally_owned_dofs,
+                       dsp,
                        MPI_COMM_WORLD);
 }
 
@@ -164,7 +167,7 @@ void Step3::setup_system()
 
 void Step3::assemble_system()
 {
-  QGauss<2> quadrature_formula(fe.degree + 1);
+  QGauss<2>   quadrature_formula(fe.degree + 1);
   FEValues<2> fe_values(fe,
                         quadrature_formula,
                         update_values | update_gradients | update_JxW_values);
@@ -179,7 +182,7 @@ void Step3::assemble_system()
   for (const auto &cell : dof_handler.active_cell_iterators())
     {
       /* skip all cells that are not locally owned: */
-      if(!cell->is_locally_owned())
+      if (!cell->is_locally_owned())
         continue;
 
       fe_values.reinit(cell);
@@ -203,11 +206,8 @@ void Step3::assemble_system()
         }
 
       cell->get_dof_indices(local_dof_indices);
-      constraints.distribute_local_to_global(cell_matrix,
-                                             cell_rhs,
-                                             local_dof_indices,
-                                             system_matrix,
-                                             system_rhs);
+      constraints.distribute_local_to_global(
+        cell_matrix, cell_rhs, local_dof_indices, system_matrix, system_rhs);
     }
 
   system_matrix.compress(VectorOperation::add);
@@ -219,7 +219,7 @@ void Step3::assemble_system()
 void Step3::solve()
 {
   SolverControl solver_control(1000, 1e-12);
-  LA::SolverCG solver(solver_control, MPI_COMM_WORLD);
+  LA::SolverCG  solver(solver_control, MPI_COMM_WORLD);
 
   PETScWrappers::PreconditionNone preconditioner(system_matrix);
 
@@ -232,8 +232,9 @@ void Step3::solve()
 
 void Step3::output_results() const
 {
-  LA::MPI::Vector locally_relevant_solution(
-      locally_owned_dofs, locally_relevant_dofs, MPI_COMM_WORLD);
+  LA::MPI::Vector locally_relevant_solution(locally_owned_dofs,
+                                            locally_relevant_dofs,
+                                            MPI_COMM_WORLD);
   locally_relevant_solution = solution;
 
   DataOut<2> data_out;
@@ -242,7 +243,7 @@ void Step3::output_results() const
   data_out.build_patches();
 
   const auto mpi_rank =
-      dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+    dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
 
   std::ofstream output("solution-" + std::to_string(mpi_rank) + ".vtk");
   data_out.write_vtk(output);
