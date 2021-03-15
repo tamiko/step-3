@@ -17,6 +17,10 @@
 #include <deal.II/distributed/tria.h> // CHANGES
 #include <deal.II/grid/grid_out.h>    // CHANGES
 
+#include <deal.II/lac/generic_linear_algebra.h> // CHANGES
+namespace LA = dealii::LinearAlgebraPETSc;      // CHANGES
+#include <deal.II/lac/sparsity_tools.h>         // CHANGES
+
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/grid/grid_generator.h>
 
@@ -66,14 +70,18 @@ private:
   void output_results() const;
 
   parallel::distributed::Triangulation<2> triangulation;
+
   FE_Q<2>          fe;
   DoFHandler<2>    dof_handler;
 
-  SparsityPattern      sparsity_pattern;
-  SparseMatrix<double> system_matrix;
+  IndexSet locally_owned_dofs;
+  IndexSet locally_relevant_dofs;
 
-  Vector<double> solution;
-  Vector<double> system_rhs;
+  AffineConstraints<double> constraints;
+
+  LA::MPI::SparseMatrix system_matrix;
+  LA::MPI::Vector       solution;
+  LA::MPI::Vector       system_rhs;
 };
 
 
@@ -98,8 +106,10 @@ void Step3::make_grid()
     grid_out.write_ucd(triangulation, out);
   }
 
-  std::cout << "Number of active cells: " << triangulation.n_active_cells()
-            << std::endl;
+  const auto mpi_rank =
+      dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+  std::cout << "Rank " + std::to_string(mpi_rank) + "  #cells = "
+            << triangulation.n_active_cells() << std::endl;
 }
 
 
@@ -107,18 +117,46 @@ void Step3::make_grid()
 
 void Step3::setup_system()
 {
+  // distribute dofs:
+
   dof_handler.distribute_dofs(fe);
-  std::cout << "Number of degrees of freedom: " << dof_handler.n_dofs()
-            << std::endl;
 
-  DynamicSparsityPattern dsp(dof_handler.n_dofs());
+  const auto mpi_rank =
+      dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+  std::cout << "Rank " + std::to_string(mpi_rank) + "  #dofs  = "
+            << dof_handler.n_locally_owned_dofs() << std::endl;
+
+  // get locally owned and locally relevant dofs:
+
+  locally_owned_dofs = dof_handler.locally_owned_dofs();
+  DoFTools::extract_locally_relevant_dofs(dof_handler, locally_relevant_dofs);
+
+  // initialize vectors:
+
+  solution.reinit(locally_owned_dofs, MPI_COMM_WORLD);
+  system_rhs.reinit(locally_owned_dofs, MPI_COMM_WORLD);
+
+  // create constraints:
+
+  constraints.clear();
+  constraints.reinit(locally_relevant_dofs);
+  DoFTools::make_hanging_node_constraints(dof_handler, constraints);
+  VectorTools::interpolate_boundary_values(dof_handler,
+                                           0,
+                                           Functions::ZeroFunction<2>(),
+                                           constraints);
+  constraints.close();
+
+  // initialize matrix:
+
+  DynamicSparsityPattern dsp(locally_relevant_dofs);
+
   DoFTools::make_sparsity_pattern(dof_handler, dsp);
-  sparsity_pattern.copy_from(dsp);
+  SparsityTools::distribute_sparsity_pattern(
+      dsp, locally_owned_dofs, MPI_COMM_WORLD, locally_relevant_dofs);
 
-  system_matrix.reinit(sparsity_pattern);
-
-  solution.reinit(dof_handler.n_dofs());
-  system_rhs.reinit(dof_handler.n_dofs());
+  system_matrix.reinit(locally_owned_dofs, locally_owned_dofs, dsp,
+                       MPI_COMM_WORLD);
 }
 
 
@@ -186,10 +224,9 @@ void Step3::assemble_system()
 
 void Step3::solve()
 {
-  SolverControl solver_control(1000, 1e-12);
-  SolverCG<Vector<double>> solver(solver_control);
-
-  solver.solve(system_matrix, solution, system_rhs, PreconditionIdentity());
+//   SolverControl solver_control(1000, 1e-12);
+//   SolverCG<Vector<double>> solver(solver_control);
+//   solver.solve(system_matrix, solution, system_rhs, PreconditionIdentity());
 }
 
 
@@ -210,7 +247,7 @@ void Step3::output_results() const
 void Step3::run()
 {
   make_grid();
-//   setup_system();
+  setup_system();
 //   assemble_system();
 //   solve();
 //   output_results();
@@ -220,7 +257,7 @@ void Step3::run()
 
 int main(int argc, char *argv[])
 {
-  dealii::Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv);
+  dealii::Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
 
   deallog.depth_console(2);
 
