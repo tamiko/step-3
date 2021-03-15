@@ -14,7 +14,9 @@
  * ---------------------------------------------------------------------
  */
 
-#include <deal.II/grid/tria.h>
+#include <deal.II/distributed/tria.h> // CHANGES
+#include <deal.II/grid/grid_out.h>    // CHANGES
+
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/grid/grid_generator.h>
 
@@ -63,7 +65,7 @@ private:
   void solve();
   void output_results() const;
 
-  Triangulation<2> triangulation;
+  parallel::distributed::Triangulation<2> triangulation;
   FE_Q<2>          fe;
   DoFHandler<2>    dof_handler;
 
@@ -76,7 +78,8 @@ private:
 
 
 Step3::Step3()
-  : fe(1)
+  : triangulation(MPI_COMM_WORLD)
+  , fe(1)
   , dof_handler(triangulation)
 {}
 
@@ -86,6 +89,14 @@ void Step3::make_grid()
 {
   GridGenerator::hyper_cube(triangulation, -1, 1);
   triangulation.refine_global(5);
+
+  {
+    const auto mpi_rank =
+        dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+    std::ofstream out("triangulation-" + std::to_string(mpi_rank) + ".inp");
+    GridOut       grid_out;
+    grid_out.write_ucd(triangulation, out);
+  }
 
   std::cout << "Number of active cells: " << triangulation.n_active_cells()
             << std::endl;
@@ -199,16 +210,18 @@ void Step3::output_results() const
 void Step3::run()
 {
   make_grid();
-  setup_system();
-  assemble_system();
-  solve();
-  output_results();
+//   setup_system();
+//   assemble_system();
+//   solve();
+//   output_results();
 }
 
 
 
-int main()
+int main(int argc, char *argv[])
 {
+  dealii::Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv);
+
   deallog.depth_console(2);
 
   Step3 laplace_problem;
