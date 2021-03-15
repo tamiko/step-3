@@ -177,6 +177,10 @@ void Step3::assemble_system()
 
   for (const auto &cell : dof_handler.active_cell_iterators())
     {
+      /* skip all cells that are not locally owned: */
+      if(!cell->is_locally_owned())
+        continue;
+
       fe_values.reinit(cell);
 
       cell_matrix = 0;
@@ -196,28 +200,17 @@ void Step3::assemble_system()
                             1. *                                // f(x_q)
                             fe_values.JxW(q_index));            // dx
         }
+
       cell->get_dof_indices(local_dof_indices);
-
-      for (const unsigned int i : fe_values.dof_indices())
-        for (const unsigned int j : fe_values.dof_indices())
-          system_matrix.add(local_dof_indices[i],
-                            local_dof_indices[j],
-                            cell_matrix(i, j));
-
-      for (const unsigned int i : fe_values.dof_indices())
-        system_rhs(local_dof_indices[i]) += cell_rhs(i);
+      constraints.distribute_local_to_global(cell_matrix,
+                                             cell_rhs,
+                                             local_dof_indices,
+                                             system_matrix,
+                                             system_rhs);
     }
 
-
-  std::map<types::global_dof_index, double> boundary_values;
-  VectorTools::interpolate_boundary_values(dof_handler,
-                                           0,
-                                           Functions::ZeroFunction<2>(),
-                                           boundary_values);
-  MatrixTools::apply_boundary_values(boundary_values,
-                                     system_matrix,
-                                     solution,
-                                     system_rhs);
+  system_matrix.compress(VectorOperation::add);
+  system_rhs.compress(VectorOperation::add);
 }
 
 
@@ -248,7 +241,7 @@ void Step3::run()
 {
   make_grid();
   setup_system();
-//   assemble_system();
+  assemble_system();
 //   solve();
 //   output_results();
 }
